@@ -34,8 +34,9 @@ FRAME_SIZE = int(RATE * FRAME_DURATION / 1000)
 POST_SPEECH_BUFFER = 400
 FRAMES_TO_KEEP_AFTER_SILENCE = int(POST_SPEECH_BUFFER / FRAME_DURATION)
 
+WHISPER_MODEL = "large-v3-turbo"
+CONFIDENCE_THRESHOLD = 0.42  # Minimum confidence required to use transcription
 COMMAND_WORD = "flow"
-
 COMMAND_SYNONYMS = {
     "pause": ["pause", "paws", "paus", "pawz"],
     "unpause": ["unpause", "onpause", "on pause", "un pause"],
@@ -44,7 +45,6 @@ COMMAND_SYNONYMS = {
     "switch to browser": ["switch to browser", "open browser"],
     "save file": ["save file", "save document"]
 }
-
 COMMANDS = {
     "enter": ["enter"],
     "switch to browser": ["switch to browser"],
@@ -63,7 +63,7 @@ pending_command_word = None
 
 class Transcriber:
     def __init__(self):
-        self.model = whisper.load_model("medium.en")
+        self.model = whisper.load_model(WHISPER_MODEL)
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model.to(self.device)
 
@@ -186,11 +186,15 @@ def process_audio_chunk(frames, transcriber):
         return
 
     text, confidence = transcriber.transcribe(audio_path)
+    if confidence < CONFIDENCE_THRESHOLD:
+        logging.info(f"Discarding low-confidence transcription (confidence: {confidence:.2f}): {text}")
+        return
+        
     process_transcription_text(text, confidence)
 
 def process_transcription_text(text: str, confidence: float):
     """
-    Splits text, ensures a command only executes if preceded by "flow" 
+    Splits text, ensures a command only executes if preceded by "flow"
     in the same chunk or via pending_command_word from the last chunk.
     """
     global typed_history, is_paused, pending_command_word
