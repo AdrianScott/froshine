@@ -1,3 +1,7 @@
 venv/
 *.wav
 *.log
+
+# Environment files
+.env*
+!.env.example

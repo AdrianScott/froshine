@@ -4,34 +4,89 @@ A privacy-focused voice command system for developers that works entirely offlin
 
 Copyright 2025 Adrian Scott
 
-## Features ✨
+## Features 
 
-- 🛡️ **100% Offline** - No audio data leaves your machine
-- 🎙️ **Real-time Monitoring** - Continuous voice input detection
-- ⌨️ **IDE Integration** - Direct text insertion into code editors
-- ✨ **Voice Commands** - Custom commands for common actions
-- 🤖 **Command Word Support** - "Flow" prefix for commands (configurable)
+- **100% Offline** - No audio data leaves your machine
+- **Real-time Monitoring** - Continuous voice input detection
+- **IDE Integration** - Direct text insertion into code editors
+- **Voice Commands** - Custom commands for common actions
+- **Command Word Support** - "Flow" prefix for commands (configurable)
 - **Pause/Unpause Transcription** - Say "Flow pause" or "Flow unpause"
-- 🚀 **GPU Acceleration** - Optional CUDA support for faster processing
+- **GPU Acceleration** - Optional CUDA support for faster processing
 
-## Requirements 📋
+## Requirements 
 
 - Ubuntu 20.04+ (other Linux distros may work)
 - Python 3.8+
-- xdotool (`sudo apt install xdotool`)
+- Working microphone or audio input device
+- xdotool (`sudo apt install xdotool` on Ubuntu/Debian)
 - PortAudio libraries (`sudo apt install portaudio19-dev`)
 
-## Installation ⚙️
+## Installation 
+
+1. Clone the repository
+2. Install Python dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+## Configuration 
+
+Froshine can be configured using either:
+1. Command-line arguments
+2. Environment variables in a `.env` file
+3. System environment variables
+
+Command-line arguments take precedence over environment variables.
+
+### Environment File
+
+Copy the example configuration file to create your own:
+```bash
+cp .env.example .env
+```
+
+Then edit `.env` to customize your settings. See `.env.example` for available options.
+
+### Audio Input Configuration
+
+By default, Froshine uses your system's default audio input device. You can configure the audio input using environment variables:
+
+- `FROSHINE_AUDIO_DEVICE`: Specify a preferred audio device by name or index
+- `FROSHINE_LIST_DEVICES`: Set to "1" to list all available audio devices
+
+Examples:
+```bash
+# List all available audio devices
+FROSHINE_LIST_DEVICES=1 python voice_monitor_command_word.py
+
+# Use a specific device by name (partial match)
+FROSHINE_AUDIO_DEVICE="USB" python voice_monitor_command_word.py
+
+# Use a specific device by index
+FROSHINE_AUDIO_DEVICE="2" python voice_monitor_command_word.py
+```
+
+### Whisper Model Selection
+
+Froshine supports different Whisper models for speech recognition. You can choose the model using the `--model` or `-m` flag:
 
 ```bash
-# Clone repository
-git clone https://github.com/AdrianScott/froshine.git
-cd froshine
+# Use the tiny English model (fastest, less accurate)
+python voice_monitor_command_word.py --model tiny.en
 
-# Install dependencies
-sudo apt install portaudio19-dev python3-dev xdotool ffmpeg
-pip install -r requirements.txt
+# Use the large v3 model (slower, most accurate)
+python voice_monitor_command_word.py --model large-v3
 ```
+
+Available models:
+- `tiny.en`: Tiny model (English only) - Fastest, lowest accuracy
+- `base.en`: Base model (English only) - Fast, basic accuracy
+- `small.en`: Small model (English only) - Default, good balance
+- `medium.en`: Medium model (English only) - Better accuracy, slower
+- `large-v3`: Large v3 model (All languages) - Best accuracy, slowest
+
+The default model is `small.en`, which provides a good balance between speed and accuracy.
 
 ## Usage with voice_monitor_command_word.py
 
@@ -53,14 +108,7 @@ Begin speaking: The system will detect speech and automatically type the transcr
 - Say "Flow unpause" to resume typing text.
 - Stop the script: Say "Flow quit", or press Ctrl+C in the terminal to exit.
 
-## Configuration
-
-- In voice_monitor_command_word.py, you can modify:
-
-COMMAND_WORD to change your wake word (e.g., "assistant").
-COMMANDS dictionary to add or modify commands."
-
-## Troubleshooting 🔧
+## Troubleshooting 
 
 **Common Issues:**
 
@@ -76,7 +124,7 @@ COMMANDS dictionary to add or modify commands."
   # Reboot after running
   ```
 
-## Privacy & Security 🔒
+## Privacy & Security 
 
 - All audio processing happens locally
 - No internet connection required

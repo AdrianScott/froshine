@@ -7,6 +7,7 @@ import subprocess
 import threading
 import os
 import re
+import argparse
 from queue import Queue
 from signal import signal, SIGINT
 import whisper
@@ -15,6 +16,10 @@ from pydub.effects import normalize, low_pass_filter
 from datetime import datetime
 import logging
 import math
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,7 +39,20 @@ FRAME_SIZE = int(RATE * FRAME_DURATION / 1000)
 POST_SPEECH_BUFFER = 400
 FRAMES_TO_KEEP_AFTER_SILENCE = int(POST_SPEECH_BUFFER / FRAME_DURATION)
 
-WHISPER_MODEL = "large-v3-turbo"
+# Default Whisper model (can be overridden)
+DEFAULT_WHISPER_MODEL = "small.en"  # Balanced choice for most users
+#DEFAULT_WHISPER_MODEL = "large-v3-turbo"  # More accurate but slower
+
+def parse_args():
+    # Get model from .env or use default
+    default_model = os.getenv('FROSHINE_WHISPER_MODEL', DEFAULT_WHISPER_MODEL)
+    
+    parser = argparse.ArgumentParser(description='Froshine Voice Commander')
+    parser.add_argument('--model', '-m',
+                      default=default_model,
+                      help='Whisper model to use for speech recognition (default from FROSHINE_WHISPER_MODEL in .env or small.en)')
+    return parser.parse_args()
+
 CONFIDENCE_THRESHOLD = 0.42  # Minimum confidence required to use transcription
 COMMAND_WORD = "flow"
 COMMAND_SYNONYMS = {
@@ -62,8 +80,9 @@ is_paused = False
 pending_command_word = None
 
 class Transcriber:
-    def __init__(self):
-        self.model = whisper.load_model(WHISPER_MODEL)
+    def __init__(self, model_name):
+        logging.info(f"Loading Whisper model: {model_name}")
+        self.model = whisper.load_model(model_name)
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model.to(self.device)
 
@@ -111,17 +130,122 @@ def clean_audio(input_path, output_path):
         logging.error(f"Audio cleaning error: {e}")
         return False
 
+def print_audio_devices():
+    """Print detailed information about all audio devices and APIs"""
+    audio = pyaudio.PyAudio()
+    
+    # Print API information
+    logging.info("\nAudio APIs available:")
+    for i in range(audio.get_host_api_count()):
+        api_info = audio.get_host_api_info_by_index(i)
+        logging.info(f"API {i}: {api_info['name']}")
+        logging.info(f"  Default input device: {api_info.get('defaultInputDevice', 'None')}")
+        logging.info(f"  Default output device: {api_info.get('defaultOutputDevice', 'None')}")
+    
+    # Print all devices
+    logging.info("\nAudio devices available:")
+    for i in range(audio.get_device_count()):
+        try:
+            device_info = audio.get_device_info_by_index(i)
+            logging.info(f"\nDevice {i}: {device_info['name']}")
+            logging.info(f"  API: {device_info['hostApi']}")
+            logging.info(f"  Input channels: {device_info['maxInputChannels']}")
+            logging.info(f"  Output channels: {device_info['maxOutputChannels']}")
+            logging.info(f"  Default sample rate: {device_info['defaultSampleRate']}")
+        except Exception as e:
+            logging.error(f"Error getting device {i} info: {e}")
+    
+    return audio
+
+def get_input_device_info():
+    """Get audio input device based on system defaults or user configuration.
+    
+    Environment variables:
+    FROSHINE_AUDIO_DEVICE: Name or index of preferred audio device
+    FROSHINE_LIST_DEVICES: If set to 1, list all available devices
+    """
+    audio = pyaudio.PyAudio()
+    
+    # List devices if requested
+    if os.environ.get('FROSHINE_LIST_DEVICES') == '1':
+        logging.info("\nAvailable audio devices:")
+        for i in range(audio.get_device_count()):
+            try:
+                device_info = audio.get_device_info_by_index(i)
+                logging.info(f"Device {i}: {device_info['name']}")
+                logging.info(f"  Input channels: {device_info['maxInputChannels']}")
+                logging.info(f"  Sample rate: {device_info['defaultSampleRate']}")
+            except Exception:
+                continue
+    
+    # Check for user-specified device
+    preferred_device = os.environ.get('FROSHINE_AUDIO_DEVICE')
+    if preferred_device is not None:
+        try:
+            # Try as index first
+            if preferred_device.isdigit():
+                device_info = audio.get_device_info_by_index(int(preferred_device))
+            else:
+                # Try as name
+                for i in range(audio.get_device_count()):
+                    device_info = audio.get_device_info_by_index(i)
+                    if preferred_device.lower() in device_info['name'].lower():
+                        break
+                else:
+                    device_info = None
+            
+            if device_info and device_info.get('maxInputChannels') > 0:
+                logging.info(f"Using configured input device: {device_info['name']}")
+                return device_info
+            else:
+                logging.warning(f"Configured device '{preferred_device}' not found or has no input channels")
+        except Exception as e:
+            logging.warning(f"Error using configured device '{preferred_device}': {e}")
+    
+    # Try system default
+    try:
+        device_info = audio.get_default_input_device_info()
+        if device_info.get('maxInputChannels') > 0:
+            logging.info(f"Using system default input device: {device_info['name']}")
+            return device_info
+    except Exception as e:
+        logging.warning(f"Could not get system default input device: {e}")
+    
+    # Last resort: find first working input device
+    for i in range(audio.get_device_count()):
+        try:
+            device_info = audio.get_device_info_by_index(i)
+            if device_info.get('maxInputChannels') > 0:
+                logging.info(f"Using first available input device: {device_info['name']}")
+                return device_info
+        except Exception:
+            continue
+    
+    return None
+
 vad = webrtcvad.Vad()
 vad.set_mode(3)
 
 audio = pyaudio.PyAudio()
-stream = audio.open(
-    format=FORMAT,
-    channels=CHANNELS,
-    rate=RATE,
-    input=True,
-    frames_per_buffer=FRAME_SIZE
-)
+default_device = get_input_device_info()
+
+if not default_device:
+    logging.error("No input devices found!")
+    raise RuntimeError("No audio input devices available")
+
+try:
+    stream = audio.open(
+        format=FORMAT,
+        channels=CHANNELS,
+        rate=RATE,
+        input=True,
+        input_device_index=default_device['index'],
+        frames_per_buffer=FRAME_SIZE
+    )
+    logging.info(f"Successfully opened audio stream with device: {default_device['name']}")
+except Exception as e:
+    logging.error(f"Failed to open audio stream: {str(e)}")
+    raise
 
 audio_queue = Queue()
 
@@ -289,9 +413,8 @@ def audio_recorder():
         except:
             break
 
-def audio_processor():
+def audio_processor(transcriber):
     global running
-    transcriber = Transcriber()
     print("Audio processor started...")
 
     speech_frames = []
@@ -318,15 +441,22 @@ def audio_processor():
                     is_speaking = False
 
 def main():
+    args = parse_args()
+    signal(SIGINT, signal_handler)
+    logging.info(f"Starting Froshine with Whisper model: {args.model}")
+    
     print("\nFroshine Incremental Voice Monitor")
     print(f"Wake word: '{COMMAND_WORD}'")
-    print("Say 'flow pause' or 'flow unpause' to control transcription.\n")
-
+    print("Say:\n  'flow pause' or 'flow unpause' to control transcription.")
+    print("  'flow quit' to stop the program;\n  'flow enter' to press Enter\n")
+    
+    transcriber = Transcriber(args.model)
     recorder_thread = threading.Thread(target=audio_recorder, daemon=True)
-    processor_thread = threading.Thread(target=audio_processor, daemon=True)
+    processor_thread = threading.Thread(target=lambda: audio_processor(transcriber), daemon=True)
+    
     recorder_thread.start()
     processor_thread.start()
-
+    
     try:
         while running:
             recorder_thread.join(0.1)
@@ -343,5 +473,4 @@ def main():
         print("Exit complete")
 
 if __name__ == "__main__":
-    signal(SIGINT, signal_handler)
     main()
