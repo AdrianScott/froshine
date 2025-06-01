@@ -25,8 +25,9 @@ Copyright 2025 Adrian Scott
 ## Installation 
 
 1. Clone the repository
-2. Install Python dependencies:
+2. Install dependencies:
    ```bash
+   sudo apt install portaudio19-dev python3-dev xdotool ffmpeg
    pip install -r requirements.txt
    ```
 
